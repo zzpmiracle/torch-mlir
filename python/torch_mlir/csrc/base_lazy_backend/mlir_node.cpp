@@ -71,11 +71,6 @@ hash_t TorchMlirNode::hash() const { return dag_hash_; }
 
 hash_t TorchMlirNode::shapeHash() const { return shape_hash_; }
 
-TorchMlirOpVector TorchMlirNode::Lower(
-    TorchMlirFunction function, TorchMlirLoweringContext* loctx) const {
-  return {};
-}
-
 TensorList::TensorList(OpList values)
     : TorchMlirNode(
           /*op=*/tensor_list_opkind,
