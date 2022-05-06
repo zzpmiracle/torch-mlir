@@ -30,6 +30,7 @@ add_library(torch_mlir_ltc_backend SHARED
   base_lazy_backend/mlir_node.cpp
   base_lazy_backend/mlir_node_lowering.cpp
 )
+target_compile_features(torch_mlir_ltc_backend PRIVATE cxx_std_17)
 
 add_dependencies(torch_mlir_ltc_backend
   TorchMLIRJITIRImporter
