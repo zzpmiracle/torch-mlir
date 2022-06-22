@@ -692,20 +692,19 @@ public:
 //
 // def aten_repeat(self, repeats):
 //     sizes = self.size()
-//     unsqueezed_sizes = []
-//     expanded_sizes = []
-//     reshape_sizes = []
+//     new_sizes1 = []
+//     new_sizes2 = []
 //     leading_rank = repeats.size() - sizes.size()
 //     for r in range(leading_rank):
-//         unsqueezed_sizes.append(1)
-//         expanded_sizes.append(repeats[r])
-//         reshaped_sizes.append(repeats[r])
+//         new_sizes0.append(1)
+//         new_sizes1.append(repeats[r])
+//         new_sizes2.append(repeats[r])
 //
 //     for s, m in zip(sizes, repeats[leading_rank:]):
-//         unsqueezed_sizes += [1, s]
-//         expanded_sizes += [m, s]
-//         reshaped_sizes += [m * s]
-//     return self.view(unsqueezed_sizes).expand(expanded_sizes).view(reshaped_sizes)
+//         n_sizes0 += [1, s]
+//         n_sizes1 += [m, s]
+//         n_sizes2 += [m * s]
+//     return self.view(new_sizes0).expand(new_sizes1).view(n_sizes2)
 //
 namespace {
 class DecomposeAtenRepeatOp : public OpRewritePattern<AtenRepeatOp> {
