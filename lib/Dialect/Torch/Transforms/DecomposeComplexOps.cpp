@@ -103,9 +103,11 @@ static Value createMaxAlongDimension(PatternRewriter &rewriter, Location loc,
                                     : llvm::makeArrayRef(valueType.getSizes()),
               IntegerType::get(op->getContext(), 64, IntegerType::Signed))
           .cast<BaseTensorType>();
+//  return rewriter
+//      .create<AtenMaxDimOp>(loc, valueType, indexType, input, dim, keepDimCst)
+//      .values();
   return rewriter
-      .create<AtenMaxDimOp>(loc, valueType, indexType, input, dim, keepDimCst)
-      .values();
+      .create<AtenMaxDimValuesOp>(loc, valueType, input, dim, keepDimCst);
 }
 
 // Helper for creating `aten::sub_tensor_op`.
@@ -245,7 +247,7 @@ public:
                                 PatternRewriter &rewriter) const override {
     Value input = op.self();
     // TODO: Handle non value tensor type operands.
-    if (!input.getType().isa<ValueTensorType>()) {
+    if (!input.getType().isa<BaseTensorType>()) {
       return rewriter.notifyMatchFailure(
           op, "unimplemented: only value tensor type operands are supported");
     }
