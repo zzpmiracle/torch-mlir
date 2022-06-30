@@ -36,6 +36,10 @@ setupValueTensorToBuiltinTensorConversion(ConversionTarget &target,
                                             ValueRange inputs,
                                             Location loc) -> Value {
     assert(inputs.size() == 1);
+    if (!inputs[0].getType().isa<Torch::BaseTensorType>()) {
+       inputs[0].getDefiningOp()->getParentOp()->dump();
+       inputs[0].getDefiningOp()->dump();
+    }
     assert(inputs[0].getType().isa<Torch::BaseTensorType>());
     return builder.create<ToBuiltinTensorOp>(loc, inputs[0]);
   });
