@@ -8,6 +8,7 @@
 //===----------------------------------------------------------------------===//
 
 #include "PassDetail.h"
+#include <numeric>
 
 #include "mlir/IR/BuiltinDialect.h"
 #include "mlir/Transforms/DialectConversion.h"
@@ -1502,6 +1503,128 @@ class DecomposeAtenLayerNormOp : public OpRewritePattern<AtenLayerNormOp> {
 } // namespace
 
 namespace {
+class DecomposeAtenNativeLayerNormOp
+    : public OpRewritePattern<AtenNativeLayerNormOp> {
+  using OpRewritePattern<AtenNativeLayerNormOp>::OpRewritePattern;
+  LogicalResult matchAndRewrite(AtenNativeLayerNormOp op,
+                                PatternRewriter &rewriter) const override {
+    Location loc = op.getLoc();
+    auto context = op.getContext();
+
+    auto inputTy = op.input().getType().cast<BaseTensorType>();
+    if (!inputTy.hasSizes())
+      return rewriter.notifyMatchFailure(
+          op, "input tensor should have known sizes.");
+    int64_t inputRank = inputTy.getSizes().size();
+    Value normalizedShape = op.normalized_shape();
+    SmallVector<Value> normalizedShapeSizesTorchInt;
+    getListConstructElements(normalizedShape, normalizedShapeSizesTorchInt);
+    int64_t axis = inputRank - normalizedShapeSizesTorchInt.size();
+    SmallVector<int64_t> reduceDimInts(normalizedShapeSizesTorchInt.size());
+    std::iota(reduceDimInts.begin(), reduceDimInts.end(), axis);
+    auto reducedTy = op.getResult(1).getType();
+    auto sizeListType = ListType::get(IntType::get(context));
+
+    /*
+    // `productDimSize` is product of sizes of dimensions to be reduced.
+    Value one = rewriter.create<Torch::ConstantIntOp>(
+        loc, rewriter.getI64IntegerAttr(1));
+    Value negOne = rewriter.create<Torch::ConstantIntOp>(
+        loc, rewriter.getI64IntegerAttr(-1));
+    Value productDimSize = one;
+    for (Value dimSize : normalizedShapeSizesTorchInt) {
+      productDimSize =
+          rewriter.create<AtenMulIntOp>(loc, productDimSize, dimSize);
+    }
+
+    Value inputNewSizeList = rewriter.create<PrimListConstructOp>(
+        loc, sizeListType, ArrayRef<Value>{productDimSize, negOne});
+    SmallVector<int64_t> inputNewSizeInt(2, ShapedType::kDynamicSize);
+    Type tensorTy = inputTy.getWithSizesAndDtype(
+        llvm::makeArrayRef(inputNewSizeInt), inputTy.getDtype());
+
+    // Unlike Batch Normalization, which applies scalar scale and bias for each
+    // entire channel/plane with the affine option, Layer Normalization applies
+    // per-element scale and bias. E.g. For input {N, C, H, W}, weight for
+    // batchnorm has shape {C} while weight for layernorm has shape {H, W} or
+    {W}.
+
+    // inputReshaped = input.view({productDimSize, -1});
+    Value inputReshaped = rewriter.create<AtenViewOp>(loc, tensorTy, op.input(),
+                                            inputNewSizeList);
+
+    for (auto k = axis; k < inputRank; ++ k) {
+        normalizedShapeSizesTorchInt.push_back(one);
+    }
+    Value normalizedSizeList = rewriter.create<PrimListConstructOp>(
+        loc, sizeListType, normalizedShapeSizesTorchInt); */
+    SmallVector<Value> reduceDimVals;
+    reduceDimVals.reserve(reduceDimInts.size());
+    std::transform(reduceDimInts.begin(), reduceDimInts.end(),
+                   std::back_inserter(reduceDimVals), [&](int64_t d) {
+                     return rewriter.create<Torch::ConstantIntOp>(
+                         loc, rewriter.getI64IntegerAttr(d));
+                   });
+    Value reduceDimList =
+        rewriter.create<PrimListConstructOp>(loc, sizeListType, reduceDimVals);
+    Value one = rewriter.create<Torch::ConstantIntOp>(
+        loc, rewriter.getI64IntegerAttr(1));
+
+    Value cstTrue = rewriter.create<Torch::ConstantBoolOp>(loc, true);
+    Value none = rewriter.create<Torch::ConstantNoneOp>(loc);
+    // mean(x)
+    Value inputMean = rewriter.create<AtenMeanDimOp>(
+        loc, reducedTy, op.input(), reduceDimList, cstTrue, none);
+    // Value mean = rewriter.create<AtenViewOp>(loc, op.getResult(1).getType(),
+    // inputMean, normalizedSizeList); mean =
+    // rewriter.create<AtenMulScalarOp>(loc, mean.getType(), mean, one);
+    // inputMean = mean;
+
+    // x - mean(x)
+    Value inputZeroMean = rewriter.create<AtenSubTensorOp>(
+        loc, inputTy, op.input(), inputMean, one);
+    // var(x) = (x - mean(x))^2
+    Value inputVar = rewriter.create<AtenMulTensorOp>(
+        loc, inputTy, inputZeroMean, inputZeroMean);
+    // var(x) + eps
+    Value inputVarPlusEps = rewriter.create<AtenAddScalarOp>(
+        loc, inputTy, inputZeroMean, op.eps(), one);
+    Value inputRsqrtVar =
+        rewriter.create<AtenRsqrtOp>(loc, inputTy, inputVarPlusEps);
+
+    // calculate outputs
+    Value inputNormalized = rewriter.create<AtenMulTensorOp>(
+        loc, inputTy, inputZeroMean, inputRsqrtVar);
+    Value out = rewriter.create<AtenViewOp>(
+        loc, inputTy, inputNormalized,
+        rewriter.create<AtenSizeOp>(loc, sizeListType, op.input()));
+    Value weight = op.weight();
+    Value bias = op.bias();
+    if (!weight.getType().isa<Torch::NoneType>()) {
+      out = rewriter.create<AtenMulTensorOp>(loc, out.getType(), out, weight);
+    }
+    if (!bias.getType().isa<Torch::NoneType>()) {
+      out =
+          rewriter.create<AtenAddTensorOp>(loc, out.getType(), out, bias, one);
+    }
+    // Value mean = rewriter.create<AtenViewOp>(loc, op.getResult(1).getType(),
+    // inputMean, normalizedSizeList); Value rstd =
+    // rewriter.create<AtenViewOp>(loc, op.getResult(2).getType(),
+    // inputRsqrtVar, normalizedSizeList);
+    Value rstd = inputRsqrtVar;
+    rewriter.replaceOp(op, {out, inputMean, inputRsqrtVar});
+    // op->getParentOp()->dump();
+    // op.getResult(0).replaceAllUsesWith(out);
+    // op.getResult(1).replaceAllUsesWith(mean);
+    // op.getResult(2).replaceAllUsesWith(rstd);
+    // // rewriter.replaceOpWithNewOp<PrimTupleConstructOp>(op, out, mean,
+    // rstd);
+    return success();
+  }
+};
+} // namespace
+
+namespace {
 // Decompose `aten.empty_like` op into `aten.size` and `aten.empty` ops.
 class DecomposeAtenEmptyLikeOp : public OpRewritePattern<AtenEmptyLikeOp> {
 public:
@@ -2241,6 +2364,9 @@ class DecomposeComplexOpsPass
     target.addIllegalOp<AtenAddcdivOp>();
     target.addIllegalOp<AtenLayerNormOp>();
     patterns.add<DecomposeAtenLayerNormOp>(context);
+    target.addIllegalOp<AtenNativeLayerNormOp>();
+    patterns.add<DecomposeAtenNativeLayerNormOp>(context);
+
     target.addIllegalOp<AtenNativeBatchNormOp>();
     patterns.add<DecomposeAtenNativeBatchNormOp>(context);
     target.addIllegalOp<AtenConvolutionOverrideableOp>();
