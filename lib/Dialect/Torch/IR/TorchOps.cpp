@@ -260,8 +260,8 @@ LogicalResult ClassTypeOp::verify() {
 // PrimLoopOp
 //===----------------------------------------------------------------------===//
 
-OperandRange PrimLoopOp::getSuccessorEntryOperands(Optional<unsigned int> index) {
-  assert(index.hasValue() && index.value() == 0);
+OperandRange PrimLoopOp::getSuccessorEntryOperands(unsigned int index) {
+  // assert(index.hasValue() && index.value() == 0);
   return iterArgsInit();
 }
 
