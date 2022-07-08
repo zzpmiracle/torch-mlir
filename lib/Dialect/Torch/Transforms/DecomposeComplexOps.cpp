@@ -1156,6 +1156,66 @@ public:
 };
 } // namespace
 
+namespace {
+class DecomposeAtenNativeDropoutOp : public OpRewritePattern<AtenNativeDropoutOp> {
+public:
+  using OpRewritePattern::OpRewritePattern;
+  LogicalResult matchAndRewrite(AtenNativeDropoutOp op,
+                                PatternRewriter &rewriter) const override {
+    Location loc = op.getLoc();
+    Value input = op.input();
+    Value prob = op.p();
+    bool train = false;
+    if (!matchPattern(op.train(), m_TorchConstantBool(&train)))
+      return rewriter.notifyMatchFailure(op,
+                                         "train must be a boolean constant");
+    Value noneVal = rewriter.create<ConstantNoneOp>(loc);
+    if (!train) {
+      Value trueMask = rewriter.create<AtenOnesLikeOp>(
+        loc, op.getResult(1).getType(), input, noneVal, noneVal, noneVal, noneVal, noneVal);
+      rewriter.replaceOp(op, {input, trueMask});
+      return success();
+    }
+
+    BaseTensorType inputType = input.getType().cast<BaseTensorType>();
+    if (!inputType.hasDtype() || !inputType.getDtype().isa<mlir::FloatType>())
+      return rewriter.notifyMatchFailure(
+          op, "only support floating type input for training mode");
+    Value floatOne =
+        rewriter.create<ConstantFloatOp>(loc, rewriter.getF64FloatAttr(1.0));
+    Value oneMinusP = rewriter.create<AtenSubFloatOp>(loc, floatOne, prob);
+    Value boolMask = rewriter.create<ValsemVariantAtenBernoulliFloatOp>(
+        loc, inputType, input, oneMinusP, /*generator=*/noneVal);
+    Value maskedInput =
+        rewriter.create<AtenMulTensorOp>(loc, inputType, boolMask, input);
+    Value result = rewriter.create<AtenDivScalarOp>(loc, inputType, maskedInput,
+                                                 oneMinusP);
+    rewriter.replaceOp(op, {result, boolMask});
+    return success();
+  }
+};
+} // namespace
+
+
+// result = grad * mask * scale;
+namespace {
+class DecomposeAtenNativeDropoutBackwardOp : public OpRewritePattern<AtenNativeDropoutBackwardOp> {
+public:
+  using OpRewritePattern::OpRewritePattern;
+  LogicalResult matchAndRewrite(AtenNativeDropoutBackwardOp op,
+                                PatternRewriter &rewriter) const override {
+    Location loc = op.getLoc();
+    Value grad = op.grad_output();
+    Value mask = op.mask();
+    Value scale = op.scale();
+
+    Value maskGrad = rewriter.create<AtenMulTensorOp>(loc, grad.getType(), grad, mask);
+    rewriter.replaceOpWithNewOp<AtenMulScalarOp>(op, op.getType(), maskGrad, scale);
+    return success();
+  }
+};
+} // namespace
+
 // Decompose aten.var into: sum(square(x - mean))/(numTensorElements-1)
 // for unbiased and mean(square(x - mean)) for biased case.
 namespace {
@@ -2425,6 +2485,14 @@ class DecomposeComplexOpsPass
     target.addIllegalOp<Aten_ToCopyOp>();
     patterns.add<DecomposeAtenDropoutOp>(context);
     target.addIllegalOp<AtenDropoutOp>();
+
+    patterns.add<DecomposeAtenNativeDropoutOp>(context);
+    target.addIllegalOp<AtenNativeDropoutOp>();
+    patterns.add<DecomposeAtenNativeDropoutBackwardOp>(context);
+    target.addIllegalOp<AtenNativeDropoutBackwardOp>();
+
+
+
     target.addIllegalOp<AtenNewEmptyOp>();
     patterns.add<DecomposeAtenNewEmptyOp>(context);
     patterns.add<DecomposeAtenIndexPutHackedTwinOp>(context);
