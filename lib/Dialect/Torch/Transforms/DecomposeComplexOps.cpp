@@ -222,6 +222,7 @@ public:
 };
 } // namespace
 
+
 namespace {
 class DecomposeAtenZeroFunctionalOp
     : public OpRewritePattern<AtenZeroFunctionalOp> {
@@ -1350,8 +1351,25 @@ static LogicalResult decomposeBernoulliLikeOp(PatternRewriter &rewriter,
 
   // Since the `aten.rand_like` op expects float-type operand, create a
   // float-type tensor with the same shape as that of the `input`.
-  Value floatTensor =
+  auto getWidth = [&](Operation *op, Type dType) {
+    if (auto floatDtype = dType.dyn_cast<mlir::FloatType>()) {
+      return floatDtype.getWidth();
+    } else if(auto intDtype = dType.dyn_cast<mlir::IntegerType>()) {
+      return intDtype.getWidth();
+    } else {
+      op->emitError("only supported dtype [float, integer]");
+    }
+  };
+
+  Value floatTensor;
+  if (getWidth(op, inputType.getDtype()) < 64) {
+    floatTensor =
+      convertTensorToDtype(rewriter, loc, input, rewriter.getF32Type());
+  } else {
+    floatTensor =
       convertTensorToDtype(rewriter, loc, input, rewriter.getF64Type());
+  }
+
   Value none = rewriter.create<ConstantNoneOp>(loc);
   Value randomVal = rewriter.create<AtenRandLikeOp>(
       loc, floatTensor.getType(), floatTensor, /*dtype=*/none, /*layout=*/none,
