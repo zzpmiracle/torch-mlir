@@ -40,9 +40,11 @@ static LogicalResult lowerToLoopsImpl(OpBuilder &builder,
     return scalarLoopOp.generateScalarImplementation(builder, loc, ivs);
   }
   LogicalResult status = success();
+  Value offset = loopRanges[loopDepth].offset.dyn_cast<Value>();
+  Value size = loopRanges[loopDepth].size.dyn_cast<Value>();
+  Value stride = loopRanges[loopDepth].stride.dyn_cast<Value>();
   builder.create<scf::ForOp>(
-      loc, loopRanges[loopDepth].offset, loopRanges[loopDepth].size,
-      loopRanges[loopDepth].stride, ValueRange{},
+      loc, offset, size, stride, ValueRange{},
       [&](OpBuilder &b, Location loc, Value iv, ValueRange args) {
         ivs.push_back(iv);
         status =
