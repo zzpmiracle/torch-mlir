@@ -1323,6 +1323,25 @@ public:
 };
 } // namespace
 
+// grad_output * mask * scale
+namespace {
+class DecomposeAtenNativeDropoutBackwardOp
+    : public OpRewritePattern<AtenNativeDropoutBackwardOp> {
+public:
+  using OpRewritePattern::OpRewritePattern;
+  LogicalResult matchAndRewrite(AtenNativeDropoutBackwardOp op,
+                                PatternRewriter &rewriter) const override {
+    Location loc = op.getLoc();
+
+    Value maskedGradOutput = rewriter.create<AtenMulTensorOp>(
+        loc, op.getType(), op.grad_output(), op.mask());
+    rewriter.replaceOpWithNewOp<AtenMulScalarOp>(op, op.getType(),
+                                                 maskedGradOutput, op.scale());
+    return success();
+  }
+};
+} // namespace
+
 // Decompose aten.var into: aten.var.dim op.
 namespace {
 class DecomposeAtenVarOp : public OpRewritePattern<AtenVarOp> {
@@ -2987,6 +3006,8 @@ public:
     patterns.add<DecomposeAtenLayerNormOp>(context);
     target.addIllegalOp<AtenNativeLayerNormOp>();
     patterns.add<DecomposeAtenNativeLayerNormOp>(context);
+    target.addIllegalOp<AtenNativeLayerNormBackwardOp>();
+    patterns.add<DecomposeAtenNativeLayerNormBackwardOp>(context);
 
     target.addIllegalOp<AtenNativeBatchNormOp>();
     patterns.add<DecomposeAtenNativeBatchNormOp>(context);
@@ -3058,6 +3079,8 @@ public:
     target.addIllegalOp<Aten_ToCopyOp>();
     patterns.add<DecomposeAtenDropoutOp>(context);
     target.addIllegalOp<AtenDropoutOp>();
+    patterns.add<DecomposeAtenNativeDropoutBackwardOp>(context);
+    target.addIllegalOp<AtenNativeDropoutBackwardOp>();
     target.addIllegalOp<AtenNewEmptyOp>();
     patterns.add<DecomposeAtenNewEmptyOp>(context);
     patterns.add<DecomposeAtenIndexPutHackedTwinOp>(context);
