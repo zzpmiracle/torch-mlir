@@ -285,7 +285,7 @@ gentbl_cc_library(
     strip_include_prefix = "include",
     tbl_outs = [
         (
-            ["-gen-pass-decls", "-DTORCH_MLIR_ENABLE_MHLO"],
+            ["-gen-pass-decls", ], # "-DTORCH_MLIR_ENABLE_MHLO"],
             "include/torch-mlir/Conversion/Passes.h.inc",
         )
     ],
@@ -488,7 +488,7 @@ cc_library(
         ":TorchMLIRTorchToArith",
         ":TorchMLIRTorchToTosa",
         ":TorchMLIRTorchToTMTensor",
-        ":TorchMLIRTorchToMhlo"
+        # ":TorchMLIRTorchToMhlo"
     ]
 )
 
@@ -518,7 +518,7 @@ cc_library(
         ":TorchMLIRTorchToArith",
         ":TorchMLIRTorchToTosa",
         ":TorchMLIRTorchToTMTensor",
-        ":TorchMLIRTorchToMhlo",
+        # ":TorchMLIRTorchToMhlo",
         "@llvm-project//mlir:FuncDialect",
         "@llvm-project//mlir:Pass",
         "@llvm-project//mlir:LinalgDialect",
