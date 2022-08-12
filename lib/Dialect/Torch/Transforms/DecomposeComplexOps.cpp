@@ -738,11 +738,14 @@ public:
     auto self = op.self();
     auto selfTy = self.getType().cast<BaseTensorType>();
     // roll(input, shift, dim) = cat({
-    //   slice(input, dim, -shift, none),
-    //   slice(input, dim, 0, -shift)}, dim)
+    //   slice(input, dim, (dimSize-shift)%dimSize, none),
+    //   slice(input, dim, 0, (dimSize-shift)%dimSize}, dim)
     auto imitateRoll = [&](Value input, Value shift, Value dim,
                            int64_t cstDim) {
-      Value negShift = rewriter.create<AtenNegIntOp>(loc, shift);
+      Value dimSize = rewriter.create<AtenSizeIntOp>(loc, input, dim);
+      Value shiftPlus = rewriter.create<AtenSubIntOp>(loc, dimSize, shift);
+      Value splitPos =
+          rewriter.create<AtenRemainderIntOp>(loc, shiftPlus, dimSize);
       ArrayRef<int64_t> inputShape = selfTy.getSizes();
       SmallVector<int64_t> sizes;
       sizes.append(inputShape.begin(), inputShape.end());
@@ -750,14 +753,14 @@ public:
       Type sliceTy = selfTy.getWithSizesAndDtype(llvm::makeArrayRef(sizes),
                                                  selfTy.getDtype());
       Value slice0 = rewriter.create<AtenSliceTensorOp>(
-          loc, sliceTy, input, dim, negShift, constNone, constOne);
+          loc, sliceTy, input, dim, splitPos, constNone, constOne);
       Value slice1 = rewriter.create<AtenSliceTensorOp>(
-          loc, sliceTy, input, dim, constZero, negShift, constOne);
+          loc, sliceTy, input, dim, constZero, splitPos, constOne);
 
       Type listType = Torch::ListType::get(sliceTy);
       Value slices = rewriter.create<PrimListConstructOp>(
           loc, listType, llvm::ArrayRef<Value>{slice0, slice1});
-      return rewriter.create<AtenCatOp>(loc, self.getType(), slices, dim);
+      return rewriter.create<AtenCatOp>(loc, op.getType(), slices, dim);
     };
     int rank = getTensorRank(self);
     if (rank < 0)
@@ -1525,6 +1528,7 @@ static LogicalResult decomposeBernoulliLikeOp(PatternRewriter &rewriter,
                                               Value input, Value prob,
                                               Value &output) {
   auto inputType = input.getType().cast<BaseTensorType>();
+  auto inputDtype = inputType.getDtype();
   auto probType = prob.getType().cast<BaseTensorType>();
   // Both the `input` and `prob` must be ranked tensors.
   if (!inputType.hasSizes() || !inputType.hasDtype() || !probType.hasSizes() ||
@@ -1540,8 +1544,14 @@ static LogicalResult decomposeBernoulliLikeOp(PatternRewriter &rewriter,
 
   // Since the `aten.rand_like` op expects float-type operand, create a
   // float-type tensor with the same shape as that of the `input`.
+  Type floatDtype = rewriter.getF64Type();
+  if (inputDtype.isa<mlir::FloatType>() &&
+        inputDtype.cast<mlir::FloatType>().getWidth() < 64) {
+      floatDtype = rewriter.getF32Type();
+  }
+
   Value floatTensor =
-      convertTensorToDtype(rewriter, loc, input, rewriter.getF64Type());
+      convertTensorToDtype(rewriter, loc, input, floatDtype);
   Value none = rewriter.create<ConstantNoneOp>(loc);
   Value randomVal = rewriter.create<AtenRandLikeOp>(
       loc, floatTensor.getType(), floatTensor, /*dtype=*/none, /*layout=*/none,
@@ -1555,7 +1565,7 @@ static LogicalResult decomposeBernoulliLikeOp(PatternRewriter &rewriter,
 
   // As the `output` is expected to be of the `input` type, convert the boolean
   // tensor `lessThanP` to a `input` type tensor.
-  output = convertTensorToDtype(rewriter, loc, lessThanP, inputType.getDtype());
+  output = convertTensorToDtype(rewriter, loc, lessThanP, inputDtype);
   return success();
 }
 

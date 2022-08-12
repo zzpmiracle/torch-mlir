@@ -377,6 +377,7 @@ public:
   using BaseT =
       dataflow::SparseDataFlowAnalysis<dataflow::Lattice<ValueKnowledge>>;
   using BaseT::SparseDataFlowAnalysis;
+  void setToEntryState(dataflow::Lattice<ValueKnowledge> *lattice) override {}
 
   // Compute the knowledge for the results of an op, based on the knowledge of
   // the operands and any information intrinsic to `op`.
@@ -1108,7 +1109,7 @@ void TypeAnalysis::visitOperation(Operation *op,
 
   // Otherwise, this is an unknown operation. Just mark all results as
   // having reached a pessimistic fixpoint.
-  markAllPessimisticFixpoint(results);
+  setAllToEntryStates(results);
   return;
 }
 

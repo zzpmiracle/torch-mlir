@@ -294,6 +294,7 @@ static bool isInitialValueTransitivelySafeToInline(Value initialValue,
 namespace {
 class InlineGlobalSlotsPass
     : public InlineGlobalSlotsBase<InlineGlobalSlotsPass> {
+
   void runOnOperation() override {
 
     ModuleOp module = getOperation();

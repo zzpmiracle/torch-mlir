@@ -71,6 +71,35 @@ Value getPermutedTensor(PatternRewriter &rewriter, Operation *op, Value input,
   return result.getResult();
 }
 
+void castContractingDim(PatternRewriter &rewriter, Operation *op, Value &lhs,
+                        Value &rhs, int64_t lhsContractingDim,
+                        int64_t rhsContractingDim) {
+  auto lhsTy = lhs.getType().dyn_cast<RankedTensorType>();
+  auto rhsTy = rhs.getType().dyn_cast<RankedTensorType>();
+
+  auto oldLhsShape = lhsTy.getShape();
+  auto oldRhsShape = rhsTy.getShape();
+  SmallVector<int64_t> lhsShape;
+  SmallVector<int64_t> rhsShape;
+  lhsShape.append(oldLhsShape.begin(), oldLhsShape.end());
+  rhsShape.append(oldRhsShape.begin(), oldRhsShape.end());
+  auto lhsContractingDimSize = lhsShape[lhsContractingDim];
+  auto rhsContractingDimSize = rhsShape[rhsContractingDim];
+  if (lhsContractingDimSize != rhsContractingDimSize) {
+    if (lhsContractingDimSize == ShapedType::kDynamicSize &&
+        rhsContractingDimSize >= 0) {
+      lhsShape[lhsContractingDim] = rhsContractingDimSize;
+      auto newRankTy = RankedTensorType::get(lhsShape, lhsTy.getElementType());
+      lhs = rewriter.create<tensor::CastOp>(op->getLoc(), newRankTy, lhs);
+    } else if (rhsContractingDimSize == ShapedType::kDynamicSize &&
+               lhsContractingDimSize >= 0) {
+      rhsShape[rhsContractingDim] = lhsContractingDimSize;
+      auto newRankTy = RankedTensorType::get(rhsShape, rhsTy.getElementType());
+      rhs = rewriter.create<tensor::CastOp>(op->getLoc(), newRankTy, rhs);
+    }
+  }
+}
+
 void getBmmBroadcast(PatternRewriter &rewriter, Operation *op, Value &inpLhs,
                      Value &inpRhs, int64_t leadingRank,
                      size_t dimSizeIndexBits) {
@@ -199,6 +228,8 @@ public:
                         ->convertType(op.getType())
                         .template cast<RankedTensorType>();
 
+    castContractingDim(rewriter, op, lhs, rhs, lhsContractingDim,
+                       rhsContractingDim);
     output = rewriter
                  .create<mhlo::DotGeneralOp>(op->getLoc(), resultTy, lhs, rhs,
                                              dotDimensionNumbers, nullptr)
@@ -358,6 +389,8 @@ public:
     auto lhsContractingDim = nBatchDims + 1;
     auto rhsContractingDim = nBatchDims;
 
+    castContractingDim(rewriter, op, lhs, rhs, lhsContractingDim,
+                       rhsContractingDim);
     mhlo::DotDimensionNumbersAttr dotDimensionNumbers =
         mhlo::DotDimensionNumbersAttr::get(
             rewriter.getContext(),
