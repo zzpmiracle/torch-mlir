@@ -98,6 +98,8 @@ public:
     setSafe();
   }
 
+  ChangeResult defaultInitialize() override { setSafe(); }
+
   bool isUninitialized() const override {
     // We are an optimistic analysis, so we are always default initialized to
     // the optimistic "assumed safe" state.
@@ -294,6 +296,7 @@ static bool isInitialValueTransitivelySafeToInline(Value initialValue,
 namespace {
 class InlineGlobalSlotsPass
     : public InlineGlobalSlotsBase<InlineGlobalSlotsPass> {
+
   void runOnOperation() override {
 
     ModuleOp module = getOperation();

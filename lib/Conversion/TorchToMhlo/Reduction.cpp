@@ -369,6 +369,7 @@ LogicalResult ConvertAtenReductionOp<AtenSumOp>::matchAndRewrite(
       createInitialValueForReduceOp(op, inputTy.getElementType(), rewriter);
   if (!initValue) return failure();
 
+  llvm::sort(dims.begin(), dims.end());
   auto mhloReduceOp = rewriter.create<mhlo::ReduceOp>(
       op.getLoc(), input, initValue, rewriter.getI64TensorAttr(dims));
 
@@ -426,6 +427,7 @@ LogicalResult ConvertAtenReductionOp<AtenMaxOp>::matchAndRewrite(
   Value initValue =
       createInitialValueForReduceOp(op, inputTy.getElementType(), rewriter);
   if (!initValue) return failure();
+  llvm::sort(dims.begin(), dims.end());
   auto mhloReduceOp = rewriter.create<mhlo::ReduceOp>(
       op.getLoc(), input, initValue, rewriter.getI64TensorAttr(dims));
 
@@ -446,7 +448,9 @@ LogicalResult ConvertAtenReductionOp<AtenMaxOp>::matchAndRewrite(
     rewriter.create<mhlo::ReturnOp>(op->getLoc(), maxResult);
   }
 
-  rewriter.replaceOp(op, mhloReduceOp.getResults());
+  rewriter.replaceOpWithNewOp<tensor::CastOp>(
+      op, getTypeConverter()->convertType(op.getType()),
+      mhloReduceOp.getResults());
   return success();
 }
 } // namespace
@@ -510,6 +514,7 @@ LogicalResult ConvertAtenReductionOp<AtenSumDimIntListOp>::matchAndRewrite(
       createInitialValueForReduceOp(op, inputTy.getElementType(), rewriter);
   if (!initValue) return failure();
 
+  llvm::sort(dims.begin(), dims.end());
   auto mhloReduceOp = rewriter.create<mhlo::ReduceOp>(
       op.getLoc(), input, initValue, rewriter.getI64TensorAttr(dims));
 
@@ -551,7 +556,9 @@ LogicalResult ConvertAtenReductionOp<AtenSumDimIntListOp>::matchAndRewrite(
         mhloReduceOp.getResult(0), outShapeTensor);
     return success();
   }
-  rewriter.replaceOp(op, mhloReduceOp.getResults());
+  rewriter.replaceOpWithNewOp<tensor::CastOp>(
+      op, getTypeConverter()->convertType(op.getType()),
+      mhloReduceOp.getResults());
   return success();
 }
 } // namespace

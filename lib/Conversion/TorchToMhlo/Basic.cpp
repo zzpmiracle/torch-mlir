@@ -28,6 +28,7 @@
 using namespace mlir;
 using namespace mlir::torch;
 using namespace mlir::torch::Torch;
+using namespace mlir::torch::TorchConversion;
 
 bool skipMultiplyAlpha(Value alphaValue) {
   double doubleValue;
@@ -412,10 +413,8 @@ public:
       Value dValue = shape[i];
       Value newD;
       int64_t dInt;
-      if (!(matchPattern(dValue, m_TorchConstantInt(&dInt)))) {
-        return op->emitError("element of desired shape must be a scalar");
-      }
-      if (i >= leadingRank && dInt == -1) {
+      if (i >= leadingRank && matchPattern(dValue, m_TorchConstantInt(&dInt)) &&
+          dInt == -1) {
         newD = rewriter.create<mlir::tensor::DimOp>(op->getLoc(), self,
                                                     i - leadingRank);
       } else {
@@ -636,7 +635,11 @@ LogicalResult ConvertAtenOp<AtenReluOp>::matchAndRewrite(
       APFloat::getZero(lhsElemTy.cast<mlir::FloatType>().getFloatSemantics(),
                        false),
       lhs);
-  rewriter.replaceOpWithNewOp<mhlo::MaxOp>(op, lhs, zeroTensor);
+  auto outType = getTypeConverter()
+                     ->convertType(op.getType())
+                     .template dyn_cast<TensorType>();
+
+  rewriter.replaceOpWithNewOp<mhlo::MaxOp>(op, outType, lhs, zeroTensor);
   return success();
 }
 
@@ -664,7 +667,11 @@ LogicalResult ConvertAtenOp<AtenGeluOp>::matchAndRewrite(
   auto erf = rewriter.create<mlir::chlo::ErfOp>(loc, erfElement);
   auto erfAdd = rewriter.create<mhlo::AddOp>(loc, erf, one);
   auto halfMul = rewriter.create<mhlo::MulOp>(loc, erfAdd, half);
-  rewriter.replaceOpWithNewOp<mhlo::MulOp>(op, input, halfMul);
+  auto outType = getTypeConverter()
+                     ->convertType(op.getType())
+                     .template dyn_cast<TensorType>();
+
+  rewriter.replaceOpWithNewOp<mhlo::MulOp>(op, outType, input, halfMul);
   return success();
 }
 } // namespace
@@ -1038,7 +1045,7 @@ void mlir::torch::torch_to_mhlo::populateBasicOpPatternsAndLegality(
   INSERT_UNARY_FPONLY_PATTERN(AtenExpOp, mhlo::ExpOp);
   INSERT_UNARY_FPONLY_PATTERN(AtenCloneOp, mhlo::CopyOp);
   INSERT_UNARY_FPONLY_PATTERN(AtenSqrtOp, mhlo::SqrtOp);
-  INSERT_UNARY_FPONLY_PATTERN(AtenNegOp, mhlo::NegOp);
+  INSERT_UNARY_FPONLY_PATTERN(AtenRsqrtOp, mhlo::RsqrtOp);
 #undef INSERT_UNARY_FPONLY_PATTERN
 
 #define INSERT_CONSTANT_FILL_PATTERN(AtenOp, fillVal)                          \
@@ -1090,14 +1097,11 @@ void mlir::torch::torch_to_mhlo::populateBasicOpPatternsAndLegality(
   INSERT_ATENOP_PATTERN(ValueTensorLiteralOp);
   INSERT_ATENOP_PATTERN(AtenReciprocalOp);
   INSERT_ATENOP_PATTERN(PrimNumToTensorScalarOp);
-  INSERT_ATENOP_PATTERN(AtenContiguousOp);
 
   INSERT_ATENOP_PATTERN(AtenReluOp);
   INSERT_ATENOP_PATTERN(AtenGeluOp);
   INSERT_ATENOP_PATTERN(AtenErfOp);
-
   INSERT_ATENOP_PATTERN(AtenCatOp);
-
   INSERT_ATENOP_PATTERN(AtenBatchNormOp);
   INSERT_ATENOP_PATTERN(AtenNativeLayerNormOp);
   INSERT_ATENOP_PATTERN(AtenNumelOp);
