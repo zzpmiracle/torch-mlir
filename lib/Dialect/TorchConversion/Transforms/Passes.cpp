@@ -135,6 +135,8 @@ void TorchConversion::createTorchBackendToMhloBackendPipeline(
       TorchConversion::createVerifyInvariantsBeforeBackendLoweringPass());
 
   pm.addNestedPass<func::FuncOp>(createConvertTorchToMhloPass());
+  pm.addNestedPass<func::FuncOp>(createConvertTorchToSCFPass());
+  pm.addNestedPass<func::FuncOp>(createConvertTorchToArithPass());
 
   // Clean up any non-canonical code introduced above..
   pm.addNestedPass<func::FuncOp>(createCanonicalizerPass());
