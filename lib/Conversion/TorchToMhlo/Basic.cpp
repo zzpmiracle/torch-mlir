@@ -313,6 +313,9 @@ public:
                std::is_same<AtenOpT, AtenGtScalarOp>()) {
       compareDirectionAttr = chlo::ComparisonDirectionAttr::get(
           op->getContext(), chlo::ComparisonDirection::GT);
+    } else if (std::is_same<AtenOpT, AtenGeScalarOp>()) {
+      compareDirectionAttr = chlo::ComparisonDirectionAttr::get(
+          op->getContext(), chlo::ComparisonDirection::GE);
     } else if (std::is_same<AtenOpT, AtenEqTensorOp>() ||
                std::is_same<AtenOpT, AtenEqScalarOp>()) {
       compareDirectionAttr = chlo::ComparisonDirectionAttr::get(
@@ -1028,6 +1031,7 @@ void mlir::torch::torch_to_mhlo::populateBasicOpPatternsAndLegality(
 
   INSERT_BINARY_COMPARE_PATTERN(AtenGtTensorOp);
   INSERT_BINARY_COMPARE_PATTERN(AtenGtScalarOp);
+  INSERT_BINARY_COMPARE_PATTERN(AtenGeScalarOp);
   INSERT_BINARY_COMPARE_PATTERN(AtenLtTensorOp);
   INSERT_BINARY_COMPARE_PATTERN(AtenLtScalarOp);
   INSERT_BINARY_COMPARE_PATTERN(AtenEqTensorOp);

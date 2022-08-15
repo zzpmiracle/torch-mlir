@@ -123,6 +123,8 @@ void TorchConversion::createTorchBackendToTosaBackendPipeline(
 void TorchConversion::createTorchBackendToMhloBackendPipeline(
     OpPassManager &pm, const Torch::TorchLoweringPipelineOptions &options) {
   pm.addNestedPass<func::FuncOp>(createConvertTorchToMhloPass());
+  pm.addNestedPass<func::FuncOp>(createConvertTorchToSCFPass());
+  pm.addNestedPass<func::FuncOp>(createConvertTorchToArithPass());
 
   // Clean up any non-canonical code introduced above..
   pm.addNestedPass<func::FuncOp>(createCanonicalizerPass());
