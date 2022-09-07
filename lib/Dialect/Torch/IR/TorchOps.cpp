@@ -1314,8 +1314,13 @@ OpFoldResult AtenIntScalarOp::fold(ArrayRef<Attribute> operands) {
         static_cast<long>(floatAttr.getValue().convertToDouble()));
   }
   // If the input is int type already, the op is an identity.
-  if (getType() == getOperand().getType())
+  if (getType() == getOperand().getType()) {
     return getOperand();
+  } else {
+    auto result = getOperand();
+    result.setType(getType());
+    return result;
+  }
   return nullptr;
 }
 

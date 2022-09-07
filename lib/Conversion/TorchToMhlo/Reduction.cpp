@@ -98,12 +98,26 @@ getMaxInDim(ConversionPatternRewriter &rewriter, Operation *op, Value &input,
       RankedTensorType::get({}, rewriter.getI64Type()), dim);
 
   auto inputShapeTensor = rewriter.create<mlir::tensor::FromElementsOp>(
-      op->getLoc(), inputShapeVec);
+      op->getLoc(), inputShapeVec).getResult();
+  inputShapeTensor = rewriter.create<mhlo::ConvertOp>(
+		  op->getLoc(), 
+      RankedTensorType::get({inputShapeVec.size()},
+                            rewriter.getIntegerType(64)),
+      inputShapeTensor);
+
   auto indexTensor = rewriter.create<mhlo::DynamicIotaOp>(
       op->getLoc(),
       RankedTensorType::get(inputShape,
-                            rewriter.getIntegerType(dimSizeIndexBits)),
-      inputShapeTensor, static_cast<uint64_t>(dim));
+                            rewriter.getIntegerType(64)),
+      inputShapeTensor, static_cast<uint64_t>(dim)).getResult();
+
+  auto indexTy = indexTensor.getType().dyn_cast<RankedTensorType>();
+   indexTensor = rewriter.create<mhlo::ConvertOp>(
+		  op->getLoc(), 
+      RankedTensorType::get(indexTy.getShape(),
+                            rewriter.getIntegerType(32)),
+      indexTensor);
+
 
   auto mhloReduceOp = rewriter.create<mhlo::ReduceOp>(
       op->getLoc(), ValueRange{input, indexTensor},

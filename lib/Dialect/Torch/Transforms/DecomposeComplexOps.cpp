@@ -325,10 +325,11 @@ public:
   LogicalResult matchAndRewrite(AtenSoftmaxIntOp op,
                                 PatternRewriter &rewriter) const override {
     Value self = op.self();
-    if (!op.dtype().getType().isa<Torch::NoneType>())
-      return rewriter.notifyMatchFailure(
-          op, "Unimplemented non-None dtype for softmax");
+    // if (!op.dtype().getType().isa<Torch::NoneType>())
+    //   return rewriter.notifyMatchFailure(
+    //       op, "Unimplemented non-None dtype for softmax");
 
+    op->dump();
     BaseTensorType tensorType = self.getType().cast<BaseTensorType>();
     if (!tensorType.hasDtype() || !tensorType.getDtype().isa<mlir::FloatType>())
       return rewriter.notifyMatchFailure(op, "Only support floating type");
@@ -2366,35 +2367,36 @@ public:
   using OpRewritePattern::OpRewritePattern;
   LogicalResult matchAndRewrite(AtenToDtypeLayoutOp op,
                                 PatternRewriter &rewriter) const override {
-    // TODO: Add support for pin_memory arg equal to `True`.
-    if (!op.pin_memory().getType().isa<Torch::NoneType>()) {
-      bool pinMemory;
-      if (!matchPattern(op.pin_memory(), m_TorchConstantBool(&pinMemory)))
-        return rewriter.notifyMatchFailure(
-            op, "unimplemented: pin_memory must be a constant");
-      else if (pinMemory)
-        return rewriter.notifyMatchFailure(
-            op, "unimplemented: pin_memory is expected to be false");
-    }
+    // // TODO: Add support for pin_memory arg equal to `True`.
+    // if (!op.pin_memory().getType().isa<Torch::NoneType>()) {
+    //   bool pinMemory;
+    //   if (!matchPattern(op.pin_memory(), m_TorchConstantBool(&pinMemory)))
+    //     return rewriter.notifyMatchFailure(
+    //         op, "unimplemented: pin_memory must be a constant");
+    //   else if (pinMemory)
+    //     return rewriter.notifyMatchFailure(
+    //         op, "unimplemented: pin_memory is expected to be false");
+    // }
 
-    // TODO: Add support for non-None device arg.
-    if (!op.device().getType().isa<Torch::NoneType>()) {
-      return rewriter.notifyMatchFailure(
-          op, "unimplemented: device arg must be None");
-    }
+    // // TODO: Add support for non-None device arg.
+    // if (!op.device().getType().isa<Torch::NoneType>()) {
+    //   return rewriter.notifyMatchFailure(
+    //       op, "unimplemented: device arg must be None");
+    // }
 
-    // TODO: Add support for non-strided layout.
-    // torch.layout is by default strided i.e. 0.
-    if (!op.layout().getType().isa<Torch::NoneType>()) {
-      int64_t tensorLayout;
-      if (!matchPattern(op.layout(), m_TorchConstantInt(&tensorLayout)))
-        return rewriter.notifyMatchFailure(
-            op, "unimplemented: layout must be a constant");
-      else if (tensorLayout != torch_upstream::Layout::Strided)
-        return rewriter.notifyMatchFailure(
-            op, "unimplemented: layout is expected to be strided");
-    }
+    // // TODO: Add support for non-strided layout.
+    // // torch.layout is by default strided i.e. 0.
+    // if (!op.layout().getType().isa<Torch::NoneType>()) {
+    //   int64_t tensorLayout;
+    //   if (!matchPattern(op.layout(), m_TorchConstantInt(&tensorLayout)))
+    //     return rewriter.notifyMatchFailure(
+    //         op, "unimplemented: layout must be a constant");
+    //   else if (tensorLayout != torch_upstream::Layout::Strided)
+    //     return rewriter.notifyMatchFailure(
+    //         op, "unimplemented: layout is expected to be strided");
+    // }
 
+    op->dump();
     rewriter.replaceOpWithNewOp<AtenToDtypeOp>(op, op.getType(), op.self(),
                                                op.dtype(), op.non_blocking(),
                                                op.copy(), op.memory_format());
