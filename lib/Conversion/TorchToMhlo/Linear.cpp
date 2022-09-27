@@ -72,50 +72,56 @@ Value getPermutedTensor(PatternRewriter &rewriter, Operation *op, Value input,
 }
 
 RankedTensorType castContractingDim(PatternRewriter &rewriter, Operation *op,
-                                    Value &lhs, Value &rhs,
+                                    Value &lhs, Value &rhs, int64_t nBatchDims,
                                     int64_t lhsResultDim, int64_t rhsResultDim,
                                     int64_t lhsContractingDim,
                                     int64_t rhsContractingDim) {
   auto lhsTy = lhs.getType().dyn_cast<RankedTensorType>();
   auto rhsTy = rhs.getType().dyn_cast<RankedTensorType>();
 
+  bool shouldCastLhs = false;
+  bool shouldCastRhs = false;
   auto oldLhsShape = lhsTy.getShape();
   auto oldRhsShape = rhsTy.getShape();
   SmallVector<int64_t> lhsShape;
   SmallVector<int64_t> rhsShape;
+  SmallVector<int64_t> outShape;
+
   lhsShape.append(oldLhsShape.begin(), oldLhsShape.end());
   rhsShape.append(oldRhsShape.begin(), oldRhsShape.end());
+  // set batch dims
+  for (auto k = 0; k < nBatchDims; ++k) {
+    if (lhsShape[k] == ShapedType::kDynamicSize && rhsShape[k] >= 0) {
+      lhsShape[k] = rhsShape[k];
+      shouldCastLhs = true;
+    }
+    if (rhsShape[k] == ShapedType::kDynamicSize && lhsShape[k] >= 0) {
+      rhsShape[k] = lhsShape[k];
+      shouldCastRhs = true;
+    }
+    outShape.push_back(lhsShape[k]);
+  }
+  // set contracting dims
   auto lhsContractingDimSize = lhsShape[lhsContractingDim];
   auto rhsContractingDimSize = rhsShape[rhsContractingDim];
   if (lhsContractingDimSize != rhsContractingDimSize) {
     if (lhsContractingDimSize == ShapedType::kDynamicSize &&
         rhsContractingDimSize >= 0) {
       lhsShape[lhsContractingDim] = rhsContractingDimSize;
-      auto newRankTy = RankedTensorType::get(lhsShape, lhsTy.getElementType());
-      lhs = rewriter.create<tensor::CastOp>(op->getLoc(), newRankTy, lhs);
+      shouldCastLhs = true;
     } else if (rhsContractingDimSize == ShapedType::kDynamicSize &&
                lhsContractingDimSize >= 0) {
       rhsShape[rhsContractingDim] = lhsContractingDimSize;
-      auto newRankTy = RankedTensorType::get(rhsShape, rhsTy.getElementType());
-      rhs = rewriter.create<tensor::CastOp>(op->getLoc(), newRankTy, rhs);
+      shouldCastRhs = true;
     }
   }
-  SmallVector<int64_t> outShape;
-  // set batch dims, will skip invalid dimensions
-  for (size_t k = 0; k < lhsShape.size(); ++k) {
-    if (k == lhsResultDim || k == lhsContractingDim)
-      continue;
-    outShape.push_back(lhsShape[k]);
+  if (shouldCastLhs) {
+    auto newRankTy = RankedTensorType::get(lhsShape, lhsTy.getElementType());
+    lhs = rewriter.create<tensor::CastOp>(op->getLoc(), newRankTy, lhs);
   }
-  for (size_t k = 0, b = 0; k < rhsShape.size(); ++k) {
-    if (b >= outShape.size())
-      break;
-    if (k == rhsResultDim || k == rhsContractingDim)
-      continue;
-    if (outShape[b] == ShapedType::kDynamicSize && rhsShape[k] >= 0) {
-      outShape[b] = rhsShape[k];
-    }
-    b++;
+  if (shouldCastRhs) {
+    auto newRankTy = RankedTensorType::get(rhsShape, rhsTy.getElementType());
+    rhs = rewriter.create<tensor::CastOp>(op->getLoc(), newRankTy, rhs);
   }
 
   // set result dimensions
@@ -258,8 +264,8 @@ public:
             /*lhsContractingDimensions=*/{lhsContractingDim},
             /*rhsContractingDimensions=*/{rhsContractingDim});
     auto outTy =
-        castContractingDim(rewriter, op, lhs, rhs, lhsResultDim, rhsResultDim,
-                           lhsContractingDim, rhsContractingDim);
+        castContractingDim(rewriter, op, lhs, rhs, nBatchDims, lhsResultDim,
+                           rhsResultDim, lhsContractingDim, rhsContractingDim);
     output = rewriter
                  .create<mhlo::DotGeneralOp>(op->getLoc(), outTy, lhs, rhs,
                                              dotDimensionNumbers, nullptr)
@@ -422,8 +428,8 @@ public:
     auto rhsContractingDim = nBatchDims;
 
     auto outTy =
-        castContractingDim(rewriter, op, lhs, rhs, lhsResultDim, rhsResultDim,
-                           lhsContractingDim, rhsContractingDim);
+        castContractingDim(rewriter, op, lhs, rhs, nBatchDims, lhsResultDim,
+                           rhsResultDim, lhsContractingDim, rhsContractingDim);
     mhlo::DotDimensionNumbersAttr dotDimensionNumbers =
         mhlo::DotDimensionNumbersAttr::get(
             rewriter.getContext(),
