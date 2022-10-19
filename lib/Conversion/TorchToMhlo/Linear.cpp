@@ -8,7 +8,7 @@
 //===----------------------------------------------------------------------===//
 
 #include "torch-mlir/Conversion/TorchToMhlo/TorchToMhlo.h"
-
+#include <iostream>
 #include "../PassDetail.h"
 #include "./MhloLegalizeUtils.h"
 #include "./PopulatePatterns.h"
@@ -134,6 +134,50 @@ RankedTensorType castContractingDim(PatternRewriter &rewriter, Operation *op,
   return RankedTensorType::get(outShape, lhsTy.getElementType());
 }
 
+void getMmBroadcast(PatternRewriter &rewriter, Operation *op, Value &inpLhs,
+                     Value &inpRhs, int64_t leadingRank,
+                     size_t dimSizeIndexBits) {
+  Value lhs = inpLhs;
+  Value rhs = inpRhs;
+  auto lhsRankTy = inpLhs.getType().dyn_cast<RankedTensorType>();
+  auto rhsRankTy = inpRhs.getType().dyn_cast<RankedTensorType>();
+  auto lhsRank = lhsRankTy.getRank();
+  auto rhsRank = rhsRankTy.getRank();
+  assert(lhsRank>=2);
+
+  assert(rhsRank==2);
+
+//  auto outTy = OpConversionPattern<AtenOpT>::getTypeConverter()->convertType(
+//        op.getType());
+
+  auto lhsShape = lhsRankTy.getShape();
+  auto rhsShape = rhsRankTy.getShape();
+  // lhsRank  rhsRank
+  //    2        2
+  //    2        3
+  //    3        2
+  //    3        3
+  if (lhsRank > rhsRank) {
+    // lhsRank = 3
+    // rhsRank = 2
+    // [?, m, n] x [n, k] ==> [?xm, n] x [n, k]
+    std::cout << "aaaa" << std::endl;
+    std::vector<int64_t> newShape;
+    newShape.push_back(lhsShape[0]*lhsShape[1]);
+    newShape.push_back(lhsShape[2]);
+    std::cout << "bbbb" << std::endl;
+    lhs = rewriter.create<mhlo::ReshapeOp>(
+          op->getLoc(),
+          RankedTensorType::get(
+              newShape,
+              lhsRankTy.getElementType()),
+         lhs);
+  }
+  std::cout << "cccc" << std::endl;
+  inpLhs = lhs;
+  inpRhs = rhs;
+}
+
 void getBmmBroadcast(PatternRewriter &rewriter, Operation *op, Value &inpLhs,
                      Value &inpRhs, int64_t leadingRank,
                      size_t dimSizeIndexBits) {
@@ -153,6 +197,8 @@ void getBmmBroadcast(PatternRewriter &rewriter, Operation *op, Value &inpLhs,
       llvm::seq<int64_t>(leadingRank, minRank + leadingRank));
   auto lhsShape = lhsRankTy.getShape();
   auto rhsShape = rhsRankTy.getShape();
+//  std::cout << "lhsRank: " << lhsRank << std::endl;
+//  std::cout << "rhsRank: " << rhsRank << std::endl;
   if (lhsRank < rhsRank) {
     std::vector<int64_t> newShape(rhsShape.begin(),
                                   rhsShape.begin() + leadingRank);
@@ -214,6 +260,8 @@ public:
     auto rhsRank = rhsTy.getRank();
     auto lhsElemTy = lhsTy.getElementType();
     auto rhsElemTy = rhsTy.getElementType();
+    auto lhsShape = lhsTy.getShape();
+    auto rhsShape = rhsTy.getShape();
 
     if (lhsElemTy != rhsElemTy)
       return op.emitError("matmul: input datatypes mismatched");
@@ -225,9 +273,33 @@ public:
       output = rewriter.create<mhlo::DotOp>(op->getLoc(), lhs, rhs, nullptr);
       return success();
     }
-
+    std::cout << "lhsRank: " << lhsRank << std::endl;
+    std::cout << "rhsRank: " << rhsRank << std::endl;
     const auto &options = ConvertAtenOp<AtenOpT>::getOptions();
     int64_t nBatchDims;
+    if (lhsRank == 3 && rhsRank == 2) {
+        int64_t batch = lhsShape[0];
+        int64_t m = lhsShape[1];
+        int64_t k = rhsShape[1];
+        std::vector<int64_t> now_output_shape;
+        now_output_shape.push_back(batch);
+        now_output_shape.push_back(m);
+        now_output_shape.push_back(k);
+
+        std::cout << "11111: " << std::endl;
+        getMmBroadcast(rewriter, op, lhs, rhs, 1, options.dimSizeIndexBits);
+        std::cout << "22222: " << rhsRank << std::endl;
+        output = rewriter.create<mhlo::DotOp>(op->getLoc(), lhs, rhs, nullptr).getResult();
+        output = rewriter.create<mhlo::ReshapeOp>(
+          op->getLoc(),
+          RankedTensorType::get(
+              now_output_shape,
+              lhsElemTy),
+         output);
+
+
+        return success();
+    }
     if (rhsRank <= 2) {
       auto leadingRank = lhsRank - 2;
       getBmmBroadcast(rewriter, op, lhs, rhs, leadingRank,
@@ -357,6 +429,7 @@ public:
   }
 };
 
+
 // Implements handling of aten.linear op.
 template <typename AtenOpT>
 class ConvertAtenLinearOp : public ConvertAtenMatmulBaseOp<AtenOpT> {
@@ -412,12 +485,16 @@ public:
 
     auto lhsTy = lhs.getType().cast<RankedTensorType>();
     auto rhsTy = rhs.getType().cast<RankedTensorType>();
-    auto leadingRank = std::max(lhsTy.getRank() - rhsTy.getRank(),
-                                rhsTy.getRank() - lhsTy.getRank());
+    auto lhsRank = lhsTy.getRank();
+    auto rhsRank = rhsTy.getRank();
+
+    auto leadingRank = std::max(lhsRank - rhsRank,
+                                rhsRank - lhsRank);
 
     const auto &options = ConvertAtenOp<AtenOpT>::getOptions();
     getBmmBroadcast(rewriter, op, lhs, rhs, leadingRank,
                     options.dimSizeIndexBits);
+
     auto resultRank = std::max(lhsTy.getRank(), rhsTy.getRank());
     auto nBatchDims = resultRank - 2;
     auto batchDims = llvm::to_vector<4>(llvm::seq<int64_t>(0, nBatchDims));
