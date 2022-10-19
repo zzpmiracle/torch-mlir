@@ -146,8 +146,6 @@ void getMmBroadcast(PatternRewriter &rewriter, Operation *op, Value &inpLhs,
   assert(lhsRank>=2);
 
   assert(rhsRank==2);
-
-//  auto outTy = OpConversionPattern<AtenOpT>::getTypeConverter()->convertType(
 //        op.getType());
 
   auto lhsShape = lhsRankTy.getShape();
@@ -161,17 +159,37 @@ void getMmBroadcast(PatternRewriter &rewriter, Operation *op, Value &inpLhs,
     // lhsRank = 3
     // rhsRank = 2
     // [?, m, n] x [n, k] ==> [?xm, n] x [n, k]
-    std::cout << "aaaa" << std::endl;
+    auto lhs_dims_vec = *mhlo::getDimSizesOfTensor(
+        rewriter, op, lhs, dimSizeIndexBits);
+    Value lhs_dim0 = lhs_dims_vec[0];
+    Value lhs_dim1 = lhs_dims_vec[1];
+    Value lhs_dim2 = lhs_dims_vec[2];
+    Value lhs_new_dim0 = rewriter.create<mlir::arith::MulIOp>(
+        op->getLoc(), lhs_dim0, lhs_dim1);
+
+    SmallVector<Value, 4> lhs_new_dims;
+    lhs_new_dims.push_back(lhs_new_dim0);
+    lhs_new_dims.push_back(lhs_dim2);
+
+    Value lhsShapeTensor = rewriter.create<mlir::tensor::FromElementsOp>(
+        op->getLoc(), lhs_new_dims);
+
     std::vector<int64_t> newShape;
-    newShape.push_back(lhsShape[0]*lhsShape[1]);
+    int64_t dim1_num = lhsShape[0];
+    int64_t dim2_num = lhsShape[1];
+    if (dim1_num>0 && dim2_num>0){
+        newShape.push_back(dim1_num*dim2_num);
+    } else {
+        newShape.push_back(-1);
+    }
     newShape.push_back(lhsShape[2]);
-    std::cout << "bbbb" << std::endl;
-    lhs = rewriter.create<mhlo::ReshapeOp>(
+
+    lhs = rewriter.create<mhlo::DynamicReshapeOp>(
           op->getLoc(),
           RankedTensorType::get(
               newShape,
               lhsRankTy.getElementType()),
-         lhs);
+         lhs, lhsShapeTensor);
   }
   std::cout << "cccc" << std::endl;
   inpLhs = lhs;
@@ -282,21 +300,39 @@ public:
         int64_t m = lhsShape[1];
         int64_t k = rhsShape[1];
         std::vector<int64_t> now_output_shape;
-        now_output_shape.push_back(batch);
-        now_output_shape.push_back(m);
+        if (batch > 0 && m > 0) {
+            now_output_shape.push_back(batch);
+            now_output_shape.push_back(m);
+        } else {
+            now_output_shape.push_back(-1);
+            now_output_shape.push_back(-1);
+        }
+
         now_output_shape.push_back(k);
+
+        SmallVector<Value, 4> lhs_output_dims_vec;
+        auto lhs_dims_vec = *mhlo::getDimSizesOfTensor(
+            rewriter, op, lhs, options.dimSizeIndexBits);
+        auto rhs_dims_vec = *mhlo::getDimSizesOfTensor(
+            rewriter, op, rhs, options.dimSizeIndexBits);
+        lhs_output_dims_vec.push_back(lhs_dims_vec[0]);
+        lhs_output_dims_vec.push_back(lhs_dims_vec[1]);
+        lhs_output_dims_vec.push_back(rhs_dims_vec[1]);
 
         std::cout << "11111: " << std::endl;
         getMmBroadcast(rewriter, op, lhs, rhs, 1, options.dimSizeIndexBits);
         std::cout << "22222: " << rhsRank << std::endl;
         output = rewriter.create<mhlo::DotOp>(op->getLoc(), lhs, rhs, nullptr).getResult();
-        output = rewriter.create<mhlo::ReshapeOp>(
+
+        Value outputShapeTensor = rewriter.create<mlir::tensor::FromElementsOp>(
+            op->getLoc(), lhs_output_dims_vec);
+
+        output = rewriter.create<mhlo::DynamicReshapeOp>(
           op->getLoc(),
           RankedTensorType::get(
               now_output_shape,
               lhsElemTy),
-         output);
-
+         output, outputShapeTensor);
 
         return success();
     }
