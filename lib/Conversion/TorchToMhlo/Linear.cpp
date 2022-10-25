@@ -379,10 +379,10 @@ public:
     auto lhsRank = lhsTy.getRank();
     auto rhsRank = rhsTy.getRank();
 
-    if (lhsRank != 2 && lhsRank != 3)
-      return op.emitError("aten.Linear called but input rank not 2 or 3");
-    if (rhsRank != 2 && rhsRank != 3)
-      return op.emitError("aten.Linear called but weight rank not 2 or 3");
+    if (lhsRank < 1)
+      return op.emitError("aten.Linear called but input rank 0");
+    if (rhsRank != 2)
+      return op.emitError("aten.Linear called but weight rank not 2");
 
     return success();
   }
@@ -413,9 +413,7 @@ public:
     auto lhsTy = lhs.getType().cast<RankedTensorType>();
     auto rhsTy = rhs.getType().cast<RankedTensorType>();
     auto lhsRank = lhsTy.getRank();
-    auto rhsRank = rhsTy.getRank();
-    if (rhsRank != 2)
-      return op.emitError("aten.linear weights must have rank 2");
+
     auto loc = op->getLoc();
     Value dotLhs;
     SmallVector<Value> resultDims;
@@ -423,6 +421,12 @@ public:
     if (lhsTy.getRank() <= 2) {
       dotLhs = lhs;
     } else {
+      // Broadcast weight and then use bmm would lead to too much data copy,
+      // then decreace the performance
+      // Instead, reshape input to 2-D tensor, then use dot to perform
+      // matrix-matrix multiply, and finnaly reshape to the output shape,
+      // would get better performance
+
       // [x_1, x_2, ..., x_n, in_features] * [in_features, out_features]
       // -> [x_1 * x_2 * ... * x_n , in_features] * [in_features, out_features]
       auto dotLhsTy = RankedTensorType::get(
