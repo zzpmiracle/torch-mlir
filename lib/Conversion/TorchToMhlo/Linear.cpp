@@ -414,42 +414,52 @@ public:
     auto rhsTy = rhs.getType().cast<RankedTensorType>();
     auto lhsRank = lhsTy.getRank();
     auto rhsRank = rhsTy.getRank();
-    if(rhsRank != 2) return op.emitError("aten.linear weights must have rank 2");
+    if (rhsRank != 2)
+      return op.emitError("aten.linear weights must have rank 2");
     auto loc = op->getLoc();
     Value dotLhs;
     SmallVector<Value> resultDims;
     // vector * matrix or matrix * matrix can directly use mhlo.dot_general
-    if(lhsTy.getRank() <= 2){
+    if (lhsTy.getRank() <= 2) {
       dotLhs = lhs;
-    }else{
+    } else {
       // [x_1, x_2, ..., x_n, in_features] * [in_features, out_features]
       // -> [x_1 * x_2 * ... * x_n , in_features] * [in_features, out_features]
-      auto dotLhsTy = RankedTensorType::get({ShapedType::kDynamicSize, lhsTy.getShape()[lhsRank - 1]}, lhsTy.getElementType());
+      auto dotLhsTy = RankedTensorType::get(
+          {ShapedType::kDynamicSize, lhsTy.getShape()[lhsRank - 1]},
+          lhsTy.getElementType());
       const auto &options = ConvertAtenOp<AtenOpT>::getOptions();
       Type intType = rewriter.getIntegerType(options.dimSizeIndexBits);
       Value numel = rewriter.create<arith::ConstantOp>(
-        loc, rewriter.getIntegerAttr(intType, 1));
+          loc, rewriter.getIntegerAttr(intType, 1));
 
-      for(int i = 0; i < lhsRank - 1; ++i){
+      for (int i = 0; i < lhsRank - 1; ++i) {
         Value dimValue = rewriter.create<tensor::DimOp>(loc, lhs, i);
         resultDims.push_back(dimValue);
-        numel = rewriter.create<arith::MulIOp>(loc, numel, rewriter.create<arith::IndexCastOp>(
-        loc, intType, dimValue));
+        numel = rewriter.create<arith::MulIOp>(
+            loc, numel,
+            rewriter.create<arith::IndexCastOp>(loc, intType, dimValue));
       }
-      Value lhsLastRankDim =rewriter.create<arith::IndexCastOp>(
-        loc, intType, rewriter.create<tensor::DimOp>(loc, lhs, lhsRank - 1));
+      Value lhsLastRankDim = rewriter.create<arith::IndexCastOp>(
+          loc, intType, rewriter.create<tensor::DimOp>(loc, lhs, lhsRank - 1));
       resultDims.push_back(rewriter.create<tensor::DimOp>(loc, rhs, 1));
-      Value reshapeDim = rewriter.create<mlir::tensor::FromElementsOp>(
-        op->getLoc(), ValueRange{numel, lhsLastRankDim}).getResult();
-      dotLhs = rewriter.create<mhlo::DynamicReshapeOp>(loc, dotLhsTy, lhs, reshapeDim);
+      Value reshapeDim =
+          rewriter
+              .create<mlir::tensor::FromElementsOp>(
+                  op->getLoc(), ValueRange{numel, lhsLastRankDim})
+              .getResult();
+      dotLhs = rewriter.create<mhlo::DynamicReshapeOp>(loc, dotLhsTy, lhs,
+                                                       reshapeDim);
     }
-    Value matmulOutput = rewriter.create<mhlo::DotOp>(
-        loc, dotLhs, rhs, nullptr);
-    auto outTy = ConvertAtenOp<AtenOpT>::getTypeConverter()->convertType(op.getType());
+    Value matmulOutput =
+        rewriter.create<mhlo::DotOp>(loc, dotLhs, rhs, nullptr);
+    auto outTy =
+        ConvertAtenOp<AtenOpT>::getTypeConverter()->convertType(op.getType());
     // reshape to [x_1, x_2, ..., x_n, out_features]
-    if(dotLhs != lhs){
-        matmulOutput = rewriter.create<mhlo::DynamicReshapeOp>(loc, outTy, matmulOutput, rewriter.create<mlir::tensor::FromElementsOp>(
-        loc, resultDims));
+    if (dotLhs != lhs) {
+      matmulOutput = rewriter.create<mhlo::DynamicReshapeOp>(
+          loc, outTy, matmulOutput,
+          rewriter.create<mlir::tensor::FromElementsOp>(loc, resultDims));
     }
 
     Value matmulPlusBias = matmulOutput;
@@ -460,7 +470,7 @@ public:
                                op->getLoc(), outTy, matmulOutput, bias, nullptr)
                            .getResult();
     }
-    
+
     rewriter.replaceOp(op, matmulPlusBias);
     return success();
   }
